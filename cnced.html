@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Precision CNC Solid Lab — SDF / Dual Contouring / B-Rep</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #050506; color: #e0e0e0; }
+        #ui-panel { position: absolute; top: 15px; left: 15px; width: 300px; background: rgba(15, 15, 20, 0.9); padding: 20px; border-radius: 8px; border: 1px solid #333; z-index: 10; max-height: 92vh; overflow-y: auto; backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        #ui-panel.collapsed { width: 40px; height: 40px; padding: 5px; overflow: hidden; border-radius: 5px; }
+        h1 { font-size: 14px; margin: 0 0 15px 0; color: #00f2ff; text-transform: uppercase; letter-spacing: 1.5px; display: flex; align-items: center; justify-content: space-between; }
+        #ui-panel.collapsed h1 { margin: 0; border: none; }
+        .control-group { margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid #222; }
+        label { display: block; font-size: 10px; margin-bottom: 6px; color: #888; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        select, input, button { width: 100%; padding: 10px; background: #111; border: 1px solid #333; color: white; border-radius: 4px; margin-bottom: 4px; box-sizing: border-box; font-size: 12px; outline: none; }
+        input[type="range"] { padding: 0; height: 18px; accent-color: #00f2ff; cursor: pointer; }
+        input[type="checkbox"] { width: auto; margin-right: 6px; vertical-align: middle; accent-color: #00f2ff; }
+        button { background: #0055ff; cursor: pointer; font-weight: bold; border: none; transition: 0.2s; margin-top: 8px; text-transform: uppercase; }
+        button:hover { background: #0044cc; filter: brightness(1.2); }
+        button:active { transform: scale(0.98); }
+        button.secondary { background: #222; border: 1px solid #444; }
+        button.export { background: #10b981; margin-top: 5px; }
+        button.export-stl { background: #3b82f6; margin-top: 5px; }
+        .stats { font-size: 10px; color: #666; margin-top: 15px; line-height: 1.6; font-family: monospace; }
+        .stats b { color: #aaa; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 100; flex-direction: column; backdrop-filter: blur(4px); }
+        .spinner { border: 3px solid #111; border-top: 3px solid #00f2ff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .file-input-wrapper { position: relative; overflow: hidden; display: block; margin-bottom: 8px; }
+        .file-input-wrapper input[type=file] { font-size: 100px; position: absolute; left: 0; top: 0; opacity: 0; cursor: pointer; }
+        .file-btn { background: #1a1a20; border: 1px dashed #444; padding: 10px; text-align: center; display: block; font-size: 10px; color: #888; transition: 0.2s; }
+        .file-btn:hover { border-color: #00f2ff; color: #fff; background: #202028; }
+        #btn-toggle { background: none; border: none; width: 30px; height: 30px; color: #00f2ff; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18px; margin: 0; }
+        .val-disp { float: right; color: #00f2ff; }
+        .brep-row { display: flex; align-items: center; font-size: 10px; color: #aaa; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text" style="color: #00f2ff; font-weight: bold; letter-spacing: 2px; font-size: 12px;">BUILDING SIGNED DISTANCE FIELD…</div>
+    </div>
+
+    <div id="ui-panel">
+        <h1>
+            <span class="ui-hide">SOLID LAB <span style="font-size: 9px; opacity: 0.5;">SDF · DC · B-REP</span></span>
+            <button id="btn-toggle">≡</button>
+        </h1>
+
+        <div class="ui-hide">
+            <div class="control-group">
+                <label>Top View (X-Z) <span id="top-status" class="val-disp">NONE</span></label>
+                <div class="file-input-wrapper">
+                    <div class="file-btn" id="lbl-top">Load Top Schematic</div>
+                    <input type="file" id="top-upload" accept="image/*">
+                </div>
+
+                <label>Side View (X-Y) <span id="side-status" class="val-disp">NONE</span></label>
+                <div class="file-input-wrapper">
+                    <div class="file-btn" id="lbl-side">Load Side Schematic</div>
+                    <input type="file" id="side-upload" accept="image/*">
+                </div>
+
+                <label>Front View (Z-Y) <span id="front-status" class="val-disp">NONE</span></label>
+                <div class="file-input-wrapper">
+                    <div class="file-btn" id="lbl-front">Load Front Schematic</div>
+                    <input type="file" id="front-upload" accept="image/*">
+                </div>
+
+                <label>Reference Opacity <span id="val-ref-op" class="val-disp">0.4</span></label>
+                <input type="range" id="ref-opacity" min="0" max="1" step="0.05" value="0.4">
+            </div>
+
+            <div class="control-group">
+                <label>Reconstruction Algorithm</label>
+                <select id="algo-select"></select>
+                <div class="brep-row">
+                    <input type="checkbox" id="brep-edges-toggle" checked>
+                    <span>Overlay B-Rep sharp edges</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>SDF Grid Density <span id="val-res" class="val-disp">128</span></label>
+                <input type="range" id="param-res" min="32" max="256" value="128" step="16">
+            </div>
+
+            <div class="control-group">
+                <label>Length (X Axis) <span id="val-length" class="val-disp">200</span></label>
+                <input type="range" id="param-length" min="50" max="400" value="200">
+
+                <label>Width (Z Axis) <span id="val-width" class="val-disp">200</span></label>
+                <input type="range" id="param-width" min="50" max="400" value="200">
+
+                <label>Height (Y Axis) <span id="val-thick" class="val-disp">50</span></label>
+                <input type="range" id="param-thick" min="5" max="150" value="50">
+            </div>
+
+            <div class="control-group">
+                <label>Material Preset</label>
+                <select id="material-type">
+                    <option value="aluminum">Anodized Aluminum</option>
+                    <option value="carbon">Raw Carbon Fiber</option>
+                    <option value="titanium">Brushed Titanium</option>
+                    <option value="gold">Gold Plating</option>
+                </select>
+            </div>
+
+            <button id="btn-mill">START SOLID RECONSTRUCTION</button>
+            <button id="btn-reset" class="secondary">RESET WORKPIECE</button>
+            <button id="btn-export" class="export">DOWNLOAD .OBJ</button>
+            <button id="btn-export-stl" class="export-stl">DOWNLOAD .STL</button>
+
+            <div class="stats">
+                <b>Status:</b> <span id="status-text" style="color:#00f2ff">Ready</span><br>
+                <b>Mesh:</b> <span id="mesh-info">0</span><br>
+                <b>B-Rep:</b> <span id="brep-info">0 faces / 0 edges / 0 sharp</span><br>
+                <b>Precision:</b> <span id="precis-info">0.00mm</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <!--
+        Entry point. All geometry logic lives under /js in a strict
+        modular hierarchy so the core stays untouched when new
+        solid-modeling operations are added:
+
+            js/core/          Grid3D
+            js/sdf/           SDF primitives + boolean ops + silhouette lift
+            js/extract/       Dual Contouring, Marching Cubes, Surface Nets
+                              + pluggable registry
+            js/mesh/          Weld / dedegenerate / normals / smoothing
+            js/brep/          Half-edge B-Rep + builder (coplanar face merge)
+            js/pipeline/      End-to-end orchestration
+            js/ui/            Three.js adapter + application shell
+    -->
+    <script type="module" src="./js/ui/AppMain.js"></script>
+</body>
+</html>
